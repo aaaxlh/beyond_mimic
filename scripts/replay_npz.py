@@ -68,14 +68,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     sim_dt = sim.get_physics_dt()
 
     registry_name = args_cli.registry_name
+    
+    # If registry_name doesn't contain entity/project, prepend the default entity
+    if "/" not in registry_name:
+        # Format: artifact_name -> entity/project/artifact_name
+        entity = "2940562534-dalian-university-of-technology"
+        project = "csv_to_npz"
+        registry_name = f"{entity}/{project}/{registry_name}"
+    
     if ":" not in registry_name:  # Check if the registry name includes alias, if not, append ":latest"
         registry_name += ":latest"
+    
     import pathlib
-
     import wandb
 
     api = wandb.Api()
-    artifact = api.artifact(registry_name)
+    artifact = api.artifact(registry_name, type='motions')
     motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
 
     motion = MotionLoader(
