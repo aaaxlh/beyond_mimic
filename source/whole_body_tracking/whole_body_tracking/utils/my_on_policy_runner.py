@@ -34,8 +34,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         if self.logger_type in ["wandb"]:
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
+            # Check if obs_normalizer exists, otherwise use None or try to get it from algorithm
+            normalizer = getattr(self, "obs_normalizer", None)
+            if normalizer is None and hasattr(self.alg, "actor_critic"):
+                 # Some implementations might store it in the algorithm or not use it at all
+                 pass 
+            
             export_motion_policy_as_onnx(
-                self.env.unwrapped, self.alg.policy, normalizer=self.obs_normalizer, path=policy_path, filename=filename
+                self.env.unwrapped, self.alg.policy, normalizer=normalizer, path=policy_path, filename=filename
             )
             attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))

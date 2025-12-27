@@ -314,8 +314,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
             run.link_artifact(artifact=logged_artifact, target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}")
             print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
             
-            # 上传完成后退出函数
-            return 
+            # 显式结束 wandb run
+            run.finish()
+            
+            # 强制退出程序，避免 simulation_app.close() 卡住
+            import sys
+            sys.exit(0)
 
 def main():
     """Main function."""
