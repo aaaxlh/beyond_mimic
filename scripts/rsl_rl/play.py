@@ -169,35 +169,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    
-    # 【添加调试打印】
-    print(f"\n[INFO] 准备导出模型到目录: {export_model_dir}")
-    if not os.path.exists(export_model_dir):
-        os.makedirs(export_model_dir, exist_ok=True)
-        print(f"[INFO] 创建目录: {export_model_dir}")
 
-    # export_motion_policy_as_onnx(...)
-    # attach_onnx_metadata(...)
+    # export_motion_policy_as_onnx(
+    #     env.unwrapped,
+    #     ppo_runner.alg.policy,
+    #     normalizer=getattr(ppo_runner, "obs_normalizer", None),
+    #     path=export_model_dir,
+    #     filename="policy.onnx",
+    # )
+    # attach_onnx_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir)
 
-    print("[INFO] 开始执行 export_motion_policy_as_jit ...")
-    try:
-        export_motion_policy_as_jit(
-            env.unwrapped,
-            ppo_runner.alg.policy,
-            normalizer=getattr(ppo_runner, "obs_normalizer", None),
-            path=export_model_dir,
-            filename="policy.jit",
-        )
-        print("[INFO] export_motion_policy_as_jit 执行完成。")
-        
-        print("[INFO] 开始执行 attach_jit_metadata ...")
-        attach_jit_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir, filename="policy.jit")
-        print(f"[SUCCESS] 模型导出成功: {os.path.join(export_model_dir, 'policy.jit')}")
-        
-    except Exception as e:
-        print(f"\n[ERROR] 模型导出失败! 错误信息:\n{e}")
-        import traceback
-        traceback.print_exc()
+    export_motion_policy_as_jit(
+        env.unwrapped,
+        ppo_runner.alg.policy,
+        normalizer=getattr(ppo_runner, "obs_normalizer", None),
+        path=export_model_dir,
+        filename="policy.jit",
+    )
+    attach_jit_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir, filename="policy.jit")
 
     # reset environment
     obs = env.get_observations()
