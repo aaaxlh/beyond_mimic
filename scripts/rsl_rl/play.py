@@ -61,6 +61,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 # Import extensions to set up environment tasks
 import whole_body_tracking.tasks  # noqa: F401
 from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
+from whole_body_tracking.utils.exporter2 import export_motion_policy_as_jit, attach_jit_metadata
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
@@ -96,23 +97,47 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {run_path}/{file}")
         resume_path = f"./logs/rsl_rl/temp/{file}"
 
-        if args_cli.motion_file is not None:
+        if args_cli.motion_file is not None:    # 指定了 motion file
             print(f"[INFO]: Using motion file from CLI: {args_cli.motion_file}")
             env_cfg.commands.motion.motion_file = args_cli.motion_file
 
         art = next((a for a in wandb_run.used_artifacts() if a.type == "motions"), None)
         if art is None:
             print("[WARN] No model artifact found in the run.")
-        else:
+        else:   # 从wandb artifact 下载 motion file
             env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
 
-    else:
+    else:   # Hydra 配置文件指定本地加载
         print(f"[INFO] Loading experiment from directory: {log_root_path}")
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    # 输出机器人关节顺序及其对应pd控制参数-------------------------------------------------
+    try:
+        robot = env.unwrapped.scene["robot"]
+        joint_names = robot.data.joint_names
+        # 获取 PD 参数 (注意：数据通常是 tensor，取第一行即可，因为所有环境通常参数一致)
+        # stiffness (Kp) 和 damping (Kd)
+        stiffness = robot.data.joint_stiffness[0].cpu().numpy()
+        damping = robot.data.joint_damping[0].cpu().numpy()
+        
+        print(f"\n[INFO] 机器人关节参数 (Total: {len(joint_names)})")
+        print(f"{'Index':<6} | {'Joint Name':<25} | {'Kp (Stiffness)':<15} | {'Kd (Damping)':<15}")
+        print("-" * 70)
+        for i, name in enumerate(joint_names):
+            kp = stiffness[i]
+            kd = damping[i]
+            print(f"{i:<6} | {name:<25} | {kp:<15.2f} | {kd:<15.2f}")
+        print("-" * 70 + "\n")
+        
+    except KeyError:
+        print("[WARN] 无法找到名为 'robot' 的资产，请检查 env.unwrapped.scene.keys()")
+    except Exception as e:
+        print(f"[WARN] 读取关节参数失败: {e}")
+    # 【添加/修改这段代码结束】-------------------------------------------------
 
     log_dir = os.path.dirname(resume_path)
 
@@ -144,15 +169,36 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+    
+    # 【添加调试打印】
+    print(f"\n[INFO] 准备导出模型到目录: {export_model_dir}")
+    if not os.path.exists(export_model_dir):
+        os.makedirs(export_model_dir, exist_ok=True)
+        print(f"[INFO] 创建目录: {export_model_dir}")
 
-    export_motion_policy_as_onnx(
-        env.unwrapped,
-        ppo_runner.alg.policy,
-        normalizer=getattr(ppo_runner, "obs_normalizer", None),
-        path=export_model_dir,
-        filename="policy.onnx",
-    )
-    attach_onnx_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir)
+    # export_motion_policy_as_onnx(...)
+    # attach_onnx_metadata(...)
+
+    print("[INFO] 开始执行 export_motion_policy_as_jit ...")
+    try:
+        export_motion_policy_as_jit(
+            env.unwrapped,
+            ppo_runner.alg.policy,
+            normalizer=getattr(ppo_runner, "obs_normalizer", None),
+            path=export_model_dir,
+            filename="policy.jit",
+        )
+        print("[INFO] export_motion_policy_as_jit 执行完成。")
+        
+        print("[INFO] 开始执行 attach_jit_metadata ...")
+        attach_jit_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir, filename="policy.jit")
+        print(f"[SUCCESS] 模型导出成功: {os.path.join(export_model_dir, 'policy.jit')}")
+        
+    except Exception as e:
+        print(f"\n[ERROR] 模型导出失败! 错误信息:\n{e}")
+        import traceback
+        traceback.print_exc()
+
     # reset environment
     obs = env.get_observations()
     timestep = 0

@@ -86,39 +86,65 @@ def list_to_csv_str(arr, *, decimals: int = 3, delimiter: str = ",") -> str:
 
 
 def attach_onnx_metadata(env: ManagerBasedRLEnv, run_path: str, path: str, filename="policy.onnx") -> None:
+    """
+    将环境配置和机器人参数作为元数据附加到 ONNX 模型中。
+
+    这使得部署端（如 C++ 推理环境）可以从 ONNX 文件中直接读取关节名称、
+    默认位置、观测历史长度等关键信息，无需额外的配置文件。
+
+    Args:
+        env: 包含完整配置信息的 RL 环境实例。
+        run_path: WandB 的运行路径或实验标识符。
+        path: ONNX 文件的保存目录。
+        filename: ONNX 文件名。
+    """
     onnx_path = os.path.join(path, filename)
 
+    # 1. 获取观测项名称
     observation_names = env.observation_manager.active_terms["policy"]
     observation_history_lengths: list[int] = []
 
+    # 2. 获取观测历史长度 (History Length)
+    # 如果全局设置了 history_length，则所有观测项使用相同长度
     if env.observation_manager.cfg.policy.history_length is not None:
         observation_history_lengths = [env.observation_manager.cfg.policy.history_length] * len(observation_names)
     else:
+        # 否则，逐个获取每个观测项的 history_length
         for name in observation_names:
             term_cfg = env.observation_manager.cfg.policy.to_dict()[name]
             history_length = term_cfg["history_length"]
+            # 0 表示没有历史，即长度为 1 (当前帧)
             observation_history_lengths.append(1 if history_length == 0 else history_length)
 
+    # 3. 构建元数据字典
+    # 这些数据将被序列化为字符串存储在 ONNX 模型中
     metadata = {
         "run_path": run_path,
+        # 机器人关节物理参数
         "joint_names": env.scene["robot"].data.joint_names,
         "joint_stiffness": env.scene["robot"].data.joint_stiffness[0].cpu().tolist(),
         "joint_damping": env.scene["robot"].data.joint_damping[0].cpu().tolist(),
         "default_joint_pos": env.scene["robot"].data.default_joint_pos_nominal.cpu().tolist(),
+        # 管理器配置
         "command_names": env.command_manager.active_terms,
         "observation_names": observation_names,
         "observation_history_lengths": observation_history_lengths,
         "action_scale": env.action_manager.get_term("joint_pos")._scale[0].cpu().tolist(),
+        # 运动追踪任务特定参数
         "anchor_body_name": env.command_manager.get_term("motion").cfg.anchor_body_name,
         "body_names": env.command_manager.get_term("motion").cfg.body_names,
     }
 
+    # 4. 加载现有的 ONNX 模型
     model = onnx.load(onnx_path)
 
+    # 5. 将元数据写入模型的 metadata_props 字段
     for k, v in metadata.items():
         entry = onnx.StringStringEntryProto()
         entry.key = k
+        # 列表类型转换为 CSV 格式字符串，数值/字符串直接转换
         entry.value = list_to_csv_str(v) if isinstance(v, list) else str(v)
         model.metadata_props.append(entry)
 
+    # 6. 保存带有元数据的模型
     onnx.save(model, onnx_path)

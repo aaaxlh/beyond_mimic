@@ -134,15 +134,17 @@ class ObservationsCfg:
 
     @configclass
     class PrivilegedCfg(ObsGroup):
-        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
-        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
-        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
-        body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
-        body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})   # 58维：29个关节的目标位置和速度
+        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})# 目标锚点相对于机器人实际锚点的位置
+        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})# 目标锚点相对于机器人实际锚点的姿态四元数
+
+        body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})    # 机器人各追踪部位相对于机器人锚点的位置
+        body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})    # 机器人各追踪部位相对于机器人锚点的姿态四元数
+        
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)   # 机器人基座线速度
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)   # 机器人基座角速度
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)  # 关节位置误差
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)  # 关节速度误差
         actions = ObsTerm(func=mdp.last_action)
 
     # observation groups
