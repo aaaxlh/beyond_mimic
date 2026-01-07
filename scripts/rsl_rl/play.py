@@ -124,14 +124,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         stiffness = robot.data.joint_stiffness[0].cpu().numpy()
         damping = robot.data.joint_damping[0].cpu().numpy()
         
+        # 获取 action scale
+        action_scale = env.unwrapped.action_manager.get_term("joint_pos")._scale[0].cpu().numpy()
+
         print(f"\n[INFO] 机器人关节参数 (Total: {len(joint_names)})")
-        print(f"{'Index':<6} | {'Joint Name':<25} | {'Kp (Stiffness)':<15} | {'Kd (Damping)':<15}")
-        print("-" * 70)
+        print(f"{'Index':<6} | {'Joint Name':<25} | {'Kp (Stiffness)':<15} | {'Kd (Damping)':<15} | {'Action Scale':<15}")
+        print("-" * 90)
         for i, name in enumerate(joint_names):
             kp = stiffness[i]
             kd = damping[i]
-            print(f"{i:<6} | {name:<25} | {kp:<15.2f} | {kd:<15.2f}")
-        print("-" * 70 + "\n")
+            scale = action_scale[i] if len(action_scale) > 1 else action_scale[0]
+            print(f"{i:<6} | {name:<25} | {kp:<15.2f} | {kd:<15.2f} | {scale:<15.2f}")
+        print("-" * 90 + "\n")
         
     except KeyError:
         print("[WARN] 无法找到名为 'robot' 的资产，请检查 env.unwrapped.scene.keys()")
