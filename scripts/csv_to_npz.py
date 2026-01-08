@@ -116,7 +116,43 @@ class MotionLoader:
         self.motion_base_poss_input = motion[:, :3]
         self.motion_base_rots_input = motion[:, 3:7]
         self.motion_base_rots_input = self.motion_base_rots_input[:, [3, 0, 1, 2]]  # convert to wxyz
-        self.motion_dof_poss_input = motion[:, 7:]
+        
+        # ✅ 新增：处理 29 DOF 到 23 DOF 的转换
+        all_dof_poss = motion[:, 7:]  # 所有关节数据
+        
+        if all_dof_poss.shape[1] == 29:
+            print("[INFO]: Input CSV has 29 DOF, filtering to 23 DOF...")
+            
+            # 定义 29 DOF 中需要删除的关节索引（从 0 开始计数）
+            # 假设 CSV 中的关节顺序为：
+            # 0-11: 腿部 (12个)
+            # 12-14: 腰部 (waist_yaw, waist_roll, waist_pitch)
+            # 15-21: 左臂 (shoulder*3, elbow, wrist*3)
+            # 22-28: 右臂 (shoulder*3, elbow, wrist*3)
+            
+            # 需要删除的索引：
+            # waist_roll=13, waist_pitch=14
+            # left_wrist_pitch=20, left_wrist_yaw=21
+            # right_wrist_pitch=27, right_wrist_yaw=28
+            remove_indices = [13, 14, 20, 21, 27, 28]
+            
+            # 创建保留索引列表
+            keep_indices = [i for i in range(29) if i not in remove_indices]
+            
+            # 过滤数据
+            self.motion_dof_poss_input = all_dof_poss[:, keep_indices]
+            
+            print(f"[INFO]: Filtered from {all_dof_poss.shape[1]} DOF to {self.motion_dof_poss_input.shape[1]} DOF")
+            
+        elif all_dof_poss.shape[1] == 23:
+            # 如果已经是 23 DOF，直接使用
+            self.motion_dof_poss_input = all_dof_poss
+            print("[INFO]: Input CSV already has 23 DOF")
+        else:
+            raise ValueError(
+                f"Unexpected DOF count: {all_dof_poss.shape[1]}, expected 23 or 29. "
+                f"Please check your CSV file format."
+            )
 
         self.input_frames = motion.shape[0]
         self.duration = (self.input_frames - 1) * self.input_dt
@@ -339,6 +375,7 @@ def main():
         sim,
         scene,
         joint_names=[
+            # 腿部 (12个)
             "left_hip_pitch_joint",
             "left_hip_roll_joint",
             "left_hip_yaw_joint",
@@ -351,23 +388,31 @@ def main():
             "right_knee_joint",
             "right_ankle_pitch_joint",
             "right_ankle_roll_joint",
+            
+            # 腰部 (1个)
             "waist_yaw_joint",
-            "waist_roll_joint",
-            "waist_pitch_joint",
+            # ❌ 删除以下两行
+            # "waist_roll_joint",
+            # "waist_pitch_joint",
+            
+            # 手臂 (10个)
             "left_shoulder_pitch_joint",
             "left_shoulder_roll_joint",
             "left_shoulder_yaw_joint",
             "left_elbow_joint",
             "left_wrist_roll_joint",
-            "left_wrist_pitch_joint",
-            "left_wrist_yaw_joint",
+            # ❌ 删除以下两行
+            # "left_wrist_pitch_joint",
+            # "left_wrist_yaw_joint",
+            
             "right_shoulder_pitch_joint",
             "right_shoulder_roll_joint",
             "right_shoulder_yaw_joint",
             "right_elbow_joint",
             "right_wrist_roll_joint",
-            "right_wrist_pitch_joint",
-            "right_wrist_yaw_joint",
+            # ❌ 删除以下两行
+            # "right_wrist_pitch_joint",
+            # "right_wrist_yaw_joint",
         ],
     )
 
