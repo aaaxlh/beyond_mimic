@@ -99,12 +99,26 @@ class CommandsCfg:
     )
 
 
+# @configclass
+# class ActionsCfg:
+#     """Action specifications for the MDP."""
+
+#     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
 @configclass
 class ActionsCfg:
-    """Action specifications for the MDP."""
+    """处理网络输出的action如何用于计算控制力矩"""
 
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
-
+    # 修改这里使用自定义的 MotionTrackingActionCfg
+    joint_pos = mdp.MotionTrackingActionCfg(
+        class_type=mdp.MotionTrackingAction,
+        asset_name="robot", 
+        joint_names=[".*"], 
+        command_name="motion",
+        # 设置你的系数
+        policy_coef=1.0,  # 比如 0.5
+        motion_coef=1.0,  # 比如 1.0 (残差控制通常保留完整的参考值)
+        # 注意：这里不需要手动设置 scale，因为 G1 配置中会覆盖它 (G1_ACTION_SCALE)
+    )
 
 @configclass
 class ObservationsCfg:
@@ -320,3 +334,9 @@ class TrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.eye = (1.5, 1.5, 1.5)
         self.viewer.origin_type = "asset_root"
         self.viewer.asset_name = "robot"
+
+
+
+
+
+

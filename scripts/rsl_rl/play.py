@@ -20,6 +20,8 @@ parser.add_argument(
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--motion_file", type=str, default=None, help="Path to the motion file.")
+parser.add_argument("--no_ref_action", action="store_true", default=False,
+                    help="Disable adding reference motion to actions (motion_coef=0).")
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -65,10 +67,21 @@ from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_moti
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
+    if getattr(args_cli, "no_ref_action", False):
+        try:
+            term = env_cfg.actions.joint_pos
+            if hasattr(term, "motion_coef"):
+                term.motion_coef = 0.0
+            else:
+                print("[WARN] env_cfg.actions.joint_pos has no field 'motion_coef'; cannot disable ref action.")
+        except Exception as e:
+            print(f"[WARN] Failed to disable ref action: {e}")
+            
     """Play with RSL-RL agent."""
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
-
+    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)

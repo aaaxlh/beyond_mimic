@@ -62,8 +62,12 @@ from isaaclab.utils.io import dump_yaml
 import pickle
 
 def dump_pickle(filename, data):
-    with open(filename, "wb") as f:
-        pickle.dump(data, f)
+    try:
+        with open(filename, "wb") as f:
+            pickle.dump(data, f)
+    except Exception as e:
+        # 防止手动修改一些类后，类定义与 Python 模块注册表中的不一致，导致报错终止运行
+        print(f"[WARN] Failed to dump pickle to {filename}. Error: {e}")
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
