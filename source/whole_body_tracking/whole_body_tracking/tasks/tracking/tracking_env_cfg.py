@@ -104,7 +104,16 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
-
+    # joint_pos = mdp.MotionTrackingActionCfg(
+    #     class_type=mdp.MotionTrackingAction,
+    #     asset_name="robot", 
+    #     joint_names=[".*"], 
+    #     command_name="motion",
+    #     # 设置你的系数
+    #     policy_coef=1.0,  # 比如 0.5
+    #     motion_coef=1.0,  # 比如 1.0 (残差控制通常保留完整的参考值)
+    #     # 注意：这里不需要手动设置 scale，因为 G1 配置中会覆盖它 (G1_ACTION_SCALE)
+    # )
 
 @configclass
 class ObservationsCfg:

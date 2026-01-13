@@ -1,5 +1,3 @@
-"""Hybrid action term that combines pretrained model with current training model."""
-
 from __future__ import annotations
 
 import torch
@@ -8,7 +6,6 @@ from dataclasses import MISSING
 from isaaclab.managers import ActionTerm, ActionTermCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.types import ArticulationActions
-
 
 @configclass
 class HybridPolicyActionCfg(ActionTermCfg):
@@ -56,7 +53,10 @@ class HybridPolicyAction(ActionTerm):
 
     def __init__(self, cfg: HybridPolicyActionCfg, env):
         super().__init__(cfg, env)
-        
+        if hasattr(env, "num_envs"):
+            self._num_envs = env.num_envs
+        else:
+            raise AttributeError("The environment does not have a 'num_envs' attribute.")
         # 解析关节索引
         self._joint_ids, self._joint_names = self._asset.find_joints(cfg.joint_names)
         self._num_joints = len(self._joint_ids)
@@ -108,44 +108,77 @@ class HybridPolicyAction(ActionTerm):
             raise FileNotFoundError(f"Pretrained model not found: {model_path}")
 
     def _load_from_wandb(self, artifact_path: str):
-        """Load model from WandB artifact.
-        
-        Args:
-            artifact_path: Format "wandb://<entity>/<project>/<artifact>:<version>"
-                          Example: "wandb://myteam/beyond_mimic/model-abc123:v0"
+        """Load model from WandB.
+
+        Supported formats:
+          1) Artifact:
+             "wandb://<entity>/<project>/<artifact>:<version>"
+             e.g. "wandb://myteam/myproj/model-abc123:v0"
+
+          2) Run file:
+             "wandb://<entity>/<project>/run-<run_id>/files/<filename>"
+             e.g. "wandb://myteam/myproj/run-zcru65cr/files/model_15000.pt"
         """
+        import os
         import wandb
-        
-        # 解析 artifact 路径
-        # wandb://entity/project/artifact:version
-        path_parts = artifact_path.replace("wandb://", "").split("/")
-        if len(path_parts) < 3:
-            raise ValueError(f"Invalid WandB artifact path: {artifact_path}")
-        
-        entity = path_parts[0]
-        project = path_parts[1]
-        artifact_name = "/".join(path_parts[2:])
-        
-        # 初始化 WandB（如果还没初始化）
+
+        # wandb://entity/project/...
+        path = artifact_path.replace("wandb://", "", 1)
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 3:
+            raise ValueError(f"Invalid WandB path: {artifact_path}")
+
+        entity, project = parts[0], parts[1]
+        rest = parts[2:]
+
+        # ---- Case 2: run file path ----
+        # run-<run_id>/files/<filename>
+        if len(rest) >= 3 and rest[0].startswith("run-") and rest[1] == "files":
+            run_id = rest[0].replace("run-", "", 1)
+            filename = "/".join(rest[2:])  # allow nested paths, if any
+
+            api = wandb.Api()
+            run = api.run(f"{entity}/{project}/{run_id}")
+            wf = run.file(filename)
+
+            cache_dir = os.path.join(
+                os.path.expanduser("~"),
+                ".cache",
+                "beyond_mimic",
+                "wandb_runs",
+                f"{entity}__{project}__{run_id}",
+            )
+            os.makedirs(cache_dir, exist_ok=True)
+
+            local_path = wf.download(root=cache_dir, replace=True).name
+            self._load_from_file(local_path)
+            print(f"[HybridPolicyAction] Loaded pretrained model from W&B run file: {artifact_path}")
+            print(f"[HybridPolicyAction] Downloaded to: {local_path}")
+            return
+
+        # ---- Case 1: artifact path (original behavior) ----
+        # remaining part is "<artifact>:<version>" or "<name>:<version>"
+        artifact_name = "/".join(rest)
+
+        # If not in an existing run, start a minimal one so use_artifact works reliably.
         if wandb.run is None:
-            wandb.init(entity=entity, project=project, job_type="inference")
-        
-        # 下载 artifact
+            wandb.init(entity=entity, project=project, job_type="inference", reinit=True)
+
+        # Note: type must match what you logged. Keep "model" as default.
         artifact = wandb.use_artifact(artifact_name, type="model")
         artifact_dir = artifact.download()
-        
-        # 加载模型
+
+        # Try common filenames; fallback to first .pt
         model_file = os.path.join(artifact_dir, "model.pt")
         if not os.path.exists(model_file):
-            # 尝试查找 .pt 文件
             pt_files = [f for f in os.listdir(artifact_dir) if f.endswith(".pt")]
             if pt_files:
                 model_file = os.path.join(artifact_dir, pt_files[0])
             else:
-                raise FileNotFoundError(f"No .pt file found in artifact: {artifact_dir}")
-        
+                raise FileNotFoundError(f"No .pt file found in artifact dir: {artifact_dir}")
+
         self._load_from_file(model_file)
-        print(f"[HybridPolicyAction] Loaded pretrained model from WandB: {artifact_path}")
+        print(f"[HybridPolicyAction] Loaded pretrained model from W&B artifact: {artifact_path}")
 
     def _load_from_file(self, file_path: str):
         """Load model from local file."""
@@ -229,6 +262,33 @@ class HybridPolicyAction(ActionTerm):
         
         return pretrained_action
 
+    # --------- ActionTerm required interface ---------
+
+    @property
+    def action_dim(self) -> int:
+        return self._num_joints
+
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
+    def apply_actions(self) -> None:
+        """Write the processed actions into the simulated asset."""
+        if hasattr(self._asset, "apply_action"):
+            self._asset.apply_action(self._actions)
+            return
+
+        if hasattr(self._asset, "set_joint_position_target"):
+            self._asset.set_joint_position_target(self._processed_actions, joint_ids=self._joint_ids)
+        if hasattr(self._asset, "set_joint_velocity_target"):
+            self._asset.set_joint_velocity_target(self._target_joint_vel, joint_ids=self._joint_ids)
+        if hasattr(self._asset, "set_joint_effort_target"):
+            self._asset.set_joint_effort_target(torch.zeros_like(self._processed_actions), joint_ids=self._joint_ids)
+
     def process_actions(self, actions: torch.Tensor) -> ArticulationActions:
         """
         Process actions by combining current policy and pretrained policy.
@@ -259,7 +319,6 @@ class HybridPolicyAction(ActionTerm):
         self._raw_actions[:] = actions
         self._processed_actions[:] = target_positions
         
-        # 6. 返回关节动作
         return ArticulationActions(joint_positions=target_positions)
     
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
@@ -271,7 +330,6 @@ class HybridPolicyAction(ActionTerm):
             self._pretrained_actions[:] = 0.0
         else:
             self._pretrained_actions[env_ids] = 0.0
-
 
 # 注册配置类
 HybridPolicyActionCfg.class_type = HybridPolicyAction
