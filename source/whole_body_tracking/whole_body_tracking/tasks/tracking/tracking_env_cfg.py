@@ -111,9 +111,30 @@ class ObservationsCfg:
     """Observation specifications for the MDP."""
 
     @configclass
-    class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
+    class PretrainedPolicyCfg(ObsGroup):
+        """Observations for pretrained policy (original configuration)."""
+        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
+        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
+        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
 
+        body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
+        body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
+        
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.concatenate_terms = True
+        
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Observations for current training policy (can be modified)."""
+
+        # TODO: 修改这里的观测配置以适应新的训练需求
         # observation terms (order preserved)
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
         # motion_anchor_pos_b = ObsTerm(
@@ -148,6 +169,7 @@ class ObservationsCfg:
         actions = ObsTerm(func=mdp.last_action)
 
     # observation groups
+    pretrained_policy: PretrainedPolicyCfg = PretrainedPolicyCfg()
     policy: PolicyCfg = PolicyCfg()
     critic: PrivilegedCfg = PrivilegedCfg()
 

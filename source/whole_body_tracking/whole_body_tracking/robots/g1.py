@@ -30,7 +30,7 @@ G1_CYLINDER_CFG = ArticulationCfg(
         asset_path=f"{ASSET_DIR}/g1_description/urdf/g1_23dof.urdf",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=True,  # ✅ 关闭重力
             retain_accelerations=False,
             linear_damping=0.0,
             angular_damping=0.0,
@@ -39,7 +39,8 @@ G1_CYLINDER_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=4
+            enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=4,
+            # fix_root_link=True,
         ),
         joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
