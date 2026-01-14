@@ -53,46 +53,65 @@ class HybridPolicyAction(ActionTerm):
 
     def __init__(self, cfg: HybridPolicyActionCfg, env):
         super().__init__(cfg, env)
+
         if hasattr(env, "num_envs"):
-            self._num_envs = env.num_envs
+            self._num_envs = int(env.num_envs)
         else:
             raise AttributeError("The environment does not have a 'num_envs' attribute.")
+
         # 解析关节索引
         self._joint_ids, self._joint_names = self._asset.find_joints(cfg.joint_names)
+
+        # 统一 joint_ids 为 python list[int]（便于 index/in 判断）
+        if isinstance(self._joint_ids, torch.Tensor):
+            self._joint_ids = [int(x) for x in self._joint_ids.tolist()]
+        else:
+            self._joint_ids = [int(x) for x in self._joint_ids]
+
         self._num_joints = len(self._joint_ids)
-        
+
+        # ---- ActionTerm 接口要求的 buffers（必须初始化）----
+        self._raw_actions = torch.zeros((self._num_envs, self._num_joints), device=self.device)
+        self._processed_actions = torch.zeros((self._num_envs, self._num_joints), device=self.device)
+        self._target_joint_vel = torch.zeros((self._num_envs, self._num_joints), device=self.device)
+
+        # 预训练动作缓存（调试用）
+        self._pretrained_actions = torch.zeros((self._num_envs, self._num_joints), device=self.device)
+
         # 处理缩放 (Scale)
         if isinstance(cfg.scale, (float, int)):
-            self._action_scale = torch.full(
-                (self._num_envs, self._num_joints), cfg.scale, device=self.device
-            )
+            self._action_scale = torch.full((self._num_envs, self._num_joints), float(cfg.scale), device=self.device)
         elif isinstance(cfg.scale, dict):
-            self._action_scale = torch.ones(
-                (self._num_envs, self._num_joints), device=self.device
-            )
+            self._action_scale = torch.ones((self._num_envs, self._num_joints), device=self.device)
             for joint_name, scale in cfg.scale.items():
                 ids, _ = self._asset.find_joints(joint_name)
-                for id in ids:
-                    if id in self._joint_ids:
-                        idx = self._joint_ids.index(id)
-                        self._action_scale[:, idx] = scale
+                if isinstance(ids, torch.Tensor):
+                    ids = [int(x) for x in ids.tolist()]
+                else:
+                    ids = [int(x) for x in ids]
+                for jid in ids:
+                    if jid in self._joint_ids:
+                        idx = self._joint_ids.index(jid)
+                        self._action_scale[:, idx] = float(scale)
         else:
             raise ValueError(f"Unsupported scale type: {type(cfg.scale)}")
-        
+
         # 获取默认关节位置偏移
         if cfg.use_default_offset:
             self._offset = self._asset.data.default_joint_pos[:, self._joint_ids].clone()
         else:
-            self._offset = torch.zeros(self._num_envs, self._num_joints, device=self.device)
-        
+            self._offset = torch.zeros((self._num_envs, self._num_joints), device=self.device)
+
         # 加载预训练模型
         self._pretrained_model = None
         if cfg.pretrained_model_path:
             self._load_pretrained_model(cfg.pretrained_model_path)
-        
-        # 存储预训练模型的输出（用于调试）
-        self._pretrained_actions = torch.zeros(
-            self._num_envs, self._num_joints, device=self.device
+
+        # 给 apply_actions() 走 _asset.apply_action(...) 预留容器（可选但建议）
+        self._actions = ArticulationActions(
+            joint_positions=self._processed_actions,
+            joint_velocities=self._target_joint_vel,
+            joint_efforts=None,
         )
 
     def _load_pretrained_model(self, model_path: str):
@@ -210,7 +229,7 @@ class HybridPolicyAction(ActionTerm):
         from torch import nn
         
         class SimpleActor(nn.Module):
-            def __init__(self, obs_dim, action_dim, hidden_dims=[256, 128, 64]):
+            def __init__(self, obs_dim, action_dim, hidden_dims=[512, 256, 128]):
                 super().__init__()
                 layers = []
                 in_dim = obs_dim
@@ -275,6 +294,10 @@ class HybridPolicyAction(ActionTerm):
     @property
     def processed_actions(self) -> torch.Tensor:
         return self._processed_actions
+    
+    @property
+    def _scale(self) -> torch.Tensor:
+        return self._action_scale
 
     def apply_actions(self) -> None:
         """Write the processed actions into the simulated asset."""
@@ -302,23 +325,27 @@ class HybridPolicyAction(ActionTerm):
         # 1. 获取预训练模型的动作
         pretrained_actions = self._get_pretrained_action()
         self._pretrained_actions[:] = pretrained_actions
-        
+
         # 2. 混合两个策略的输出
         combined_actions = (
             actions * self.cfg.current_policy_coef +
             pretrained_actions * self.cfg.pretrained_policy_coef
         )
-        
+
         # 3. 应用缩放
         scaled_actions = combined_actions * self._action_scale
-        
+
         # 4. 添加偏移（默认关节位置）
         target_positions = scaled_actions + self._offset
-        
-        # 5. 保存用于观测
+
+        # 5. 保存用于观测（写入私有 buffer）
         self._raw_actions[:] = actions
         self._processed_actions[:] = target_positions
-        
+
+        # 同步到 _actions（如果你在 apply_actions 里走 apply_action）
+        self._actions.joint_positions = self._processed_actions
+        self._actions.joint_velocities = self._target_joint_vel
+
         return ArticulationActions(joint_positions=target_positions)
     
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
